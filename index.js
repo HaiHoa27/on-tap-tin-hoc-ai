@@ -99,6 +99,79 @@ app.post("/chat", async (req, res) => {
   }
 });
 
+app.post("/generate-questions", async (req, res) => {
+  const { type, topic, count } = req.body;
+
+  try {
+    const prompt = `
+Bạn là giáo viên Tin học THPT Việt Nam.
+
+Hãy tạo ${count} câu hỏi về chủ đề: "${topic}"
+
+Yêu cầu:
+- Nếu type = "mcq": tạo trắc nghiệm 4 lựa chọn.
+- Nếu type = "tf": tạo đúng/sai.
+- Trả về JSON ARRAY.
+- Không thêm chữ ngoài JSON.
+
+Định dạng:
+
+MCQ:
+{
+  "type": "mcq",
+  "question": "...",
+  "options": ["A...", "B...", "C...", "D..."],
+  "answer": "A..."
+}
+
+TF:
+{
+  "type": "tf",
+  "question": "...",
+  "answer": "Đúng" hoặc "Sai"
+}
+`;
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.4,
+      }),
+    });
+
+    const data = await response.json();
+
+    const text = data.choices?.[0]?.message?.content;
+    if (!text) return res.json([]);
+
+    let jsonText = text.trim();
+    if (jsonText.startsWith("```")) {
+      jsonText = jsonText.replace(/```json|```/g, "");
+    }
+
+    let questions;
+  try {
+    questions = JSON.parse(jsonText);
+  } catch (e) {
+    console.log("RAW AI:", jsonText);
+    return res.status(500).json({ error: "AI trả dữ liệu sai JSON" });
+  }
+
+res.json(questions);
+
+  } catch (err) {
+    console.error("GEN ERROR:", err);
+    res.status(500).json({ error: "Lỗi tạo câu hỏi" });
+  }
+});
+
+
 app.get("/test", async (req, res) => {
   try {
     const r = await fetch("https://api.groq.com/openai/v1/models", {
@@ -114,6 +187,7 @@ app.get("/test", async (req, res) => {
   }
 });
 
-app.listen(3001, () => {
-  console.log("AI Server chạy tại http://localhost:3001");
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log("AI Server chạy tại port " + PORT);
 });
