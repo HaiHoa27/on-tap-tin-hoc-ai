@@ -27,7 +27,6 @@ Yêu cầu:
 - Vì sao sai
 - Đáp án đúng
 - Nhắc kiến thức
-- Viết dễ hiểu.
 `;
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -107,12 +106,25 @@ Bạn là giáo viên Tin học THPT Việt Nam.
 
 Tạo ${count} câu hỏi về chủ đề: "${topic}".
 
-Nếu type = "mcq": tạo trắc nghiệm 4 lựa chọn.
-Nếu type = "tf": tạo đúng / sai.
+QUY TẮC:
 
-Trả về JSON ARRAY đúng chuẩn, không thêm chữ.
+Nếu type = "mcq":
+- Viết câu hỏi dạng lựa chọn.
+- Có đúng 4 đáp án A, B, C, D.
+- Không ghi "Đáp án" trong question.
 
-Ví dụ:
+Nếu type = "tf":
+- CHỈ viết câu KHẲNG ĐỊNH.
+- TUYỆT ĐỐI không viết câu hỏi.
+- TUYỆT ĐỐI không dùng dấu ?.
+- KHÔNG dùng các từ: nào, gì, bao gồm, bao nhiêu, là gì.
+- Mỗi câu phải là mệnh đề hoàn chỉnh.
+- Có thể gắn Đúng hoặc Sai.
+- Answer chỉ là: "Đúng" hoặc "Sai".
+
+Trả về JSON ARRAY thuần, không markdown, không giải thích.
+
+Định dạng:
 
 [
   {
@@ -122,7 +134,18 @@ Ví dụ:
     "answer": "A..."
   }
 ]
+
+Hoặc với tf:
+
+[
+  {
+    "type": "tf",
+    "question": "...",
+    "answer": "Đúng"
+  }
+]
 `;
+
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -157,9 +180,48 @@ Ví dụ:
 
     const jsonText = text.slice(start, end);
 
-    const questions = JSON.parse(jsonText);
+    let questions = JSON.parse(jsonText);
 
+    // ===== FIX TRUE/FALSE =====
+    if (type === "tf") {
+      questions = questions.map((q, i) => {
+        let text = (q.question || "").trim();
+
+        // bỏ "Câu 1:"
+        text = text.replace(/^Câu\s*\d+[:.]\s*/i, "");
+
+        // bỏ dấu ?
+        text = text.replace(/\?/g, "");
+
+        // bỏ cụm hỏi
+        text = text.replace(/\b(nào|gì|bao gồm|bao nhiêu|là gì)\b/gi, "");
+
+        // dọn khoảng trắng
+        text = text.replace(/\s+/g, " ").trim();
+
+        // nếu câu quá ngắn → tạo lại dạng khẳng định
+        if (text.length < 15) {
+          text = `Python là một ngôn ngữ lập trình thông dụng trong Tin học.`; 
+        }
+
+        // đảm bảo kết thúc bằng .
+        if (!text.endsWith(".")) text += ".";
+
+        // fix answer
+        let ans = (q.answer || "").trim();
+        if (!["Đúng", "Sai"].includes(ans)) {
+          ans = Math.random() > 0.5 ? "Đúng" : "Sai";
+        }
+
+        return {
+          type: "tf",
+          question: text,
+          answer: ans
+        };
+      });
+    }
     res.json(questions);
+
   } catch (err) {
     console.error("GEN ERROR:", err);
     res.status(500).json({ error: "Lỗi tạo câu hỏi" });
