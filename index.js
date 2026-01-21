@@ -4,11 +4,12 @@ import dotenv from "dotenv";
 import fetch from "node-fetch";
 
 dotenv.config();
-console.log("KEY:", process.env.GROQ_API_KEY);
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+/* ================= GIẢI THÍCH ================= */
 app.post("/giai-thich", async (req, res) => {
   const { question, options, correctAnswer, userAnswer } = req.body;
 
@@ -44,8 +45,6 @@ Yêu cầu:
 
     const data = await response.json();
 
-    console.log("GROQ RESPONSE:", data);
-
     if (!data.choices) {
       return res.json({ text: "⚠️ AI chưa trả dữ liệu. Kiểm tra API Key." });
     }
@@ -57,6 +56,7 @@ Yêu cầu:
   }
 });
 
+/* ================= CHAT ================= */
 app.post("/chat", async (req, res) => {
   const { message, history } = req.body;
 
@@ -86,8 +86,6 @@ app.post("/chat", async (req, res) => {
 
     const data = await response.json();
 
-    console.log("CHAT RESPONSE:", data);
-
     if (!data.choices) {
       return res.json({ reply: "⚠️ AI chưa phản hồi." });
     }
@@ -99,6 +97,7 @@ app.post("/chat", async (req, res) => {
   }
 });
 
+/* ================= TẠO CÂU HỎI ================= */
 app.post("/generate-questions", async (req, res) => {
   const { type, topic, count } = req.body;
 
@@ -106,30 +105,23 @@ app.post("/generate-questions", async (req, res) => {
     const prompt = `
 Bạn là giáo viên Tin học THPT Việt Nam.
 
-Hãy tạo ${count} câu hỏi về chủ đề: "${topic}"
+Tạo ${count} câu hỏi về chủ đề: "${topic}".
 
-Yêu cầu:
-- Nếu type = "mcq": tạo trắc nghiệm 4 lựa chọn.
-- Nếu type = "tf": tạo đúng/sai.
-- Trả về JSON ARRAY.
-- Không thêm chữ ngoài JSON.
+Nếu type = "mcq": tạo trắc nghiệm 4 lựa chọn.
+Nếu type = "tf": tạo đúng / sai.
 
-Định dạng:
+Trả về JSON ARRAY đúng chuẩn, không thêm chữ.
 
-MCQ:
-{
-  "type": "mcq",
-  "question": "...",
-  "options": ["A...", "B...", "C...", "D..."],
-  "answer": "A..."
-}
+Ví dụ:
 
-TF:
-{
-  "type": "tf",
-  "question": "...",
-  "answer": "Đúng" hoặc "Sai"
-}
+[
+  {
+    "type": "mcq",
+    "question": "...",
+    "options": ["A...", "B...", "C...", "D..."],
+    "answer": "A..."
+  }
+]
 `;
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -141,37 +133,40 @@ TF:
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.4,
+        temperature: 0.3,
       }),
     });
 
     const data = await response.json();
 
-    const text = data.choices?.[0]?.message?.content;
+    let text = data.choices?.[0]?.message?.content;
     if (!text) return res.json([]);
 
-    let jsonText = text.trim();
-    if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/```json|```/g, "");
+    console.log("RAW AI:", text);
+
+    // clean markdown
+    text = text.replace(/```json|```/g, "").trim();
+
+    // cut valid JSON
+    const start = text.indexOf("[");
+    const end = text.lastIndexOf("]") + 1;
+
+    if (start === -1 || end === -1) {
+      return res.status(500).json({ error: "AI format sai" });
     }
 
-    let questions;
-  try {
-    questions = JSON.parse(jsonText);
-  } catch (e) {
-    console.log("RAW AI:", jsonText);
-    return res.status(500).json({ error: "AI trả dữ liệu sai JSON" });
-  }
+    const jsonText = text.slice(start, end);
 
-res.json(questions);
+    const questions = JSON.parse(jsonText);
 
+    res.json(questions);
   } catch (err) {
     console.error("GEN ERROR:", err);
     res.status(500).json({ error: "Lỗi tạo câu hỏi" });
   }
 });
 
-
+/* ================= TEST ================= */
 app.get("/test", async (req, res) => {
   try {
     const r = await fetch("https://api.groq.com/openai/v1/models", {
