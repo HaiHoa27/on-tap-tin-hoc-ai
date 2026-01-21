@@ -99,12 +99,16 @@ app.post("/chat", async (req, res) => {
 /* ================= TẠO CÂU HỎI ================= */
 app.post("/generate-questions", async (req, res) => {
   const { type, topic, count } = req.body;
+  let safeCount = parseInt(count);
+  if (isNaN(safeCount) || safeCount < 1) safeCount = 1;
+  if (safeCount > 20) safeCount = 20;
+
 
   try {
     const prompt = `
 Bạn là giáo viên Tin học THPT Việt Nam.
 
-Tạo ${count} câu hỏi về chủ đề: "${topic}".
+Tạo ${safeCount} câu hỏi về chủ đề: "${topic}".
 
 QUY TẮC:
 
@@ -228,7 +232,13 @@ Hoặc với tf:
 
     const jsonText = text.slice(start, end);
 
-    let questions = JSON.parse(jsonText);
+    let questions = [];
+    try {
+      questions = JSON.parse(jsonText);
+    } catch (e) {
+      console.error("JSON PARSE ERROR:", jsonText);
+      return res.status(500).json({ error: "AI trả JSON lỗi" });
+    }
 
     // ===== FIX MCQ =====
     if (type === "mcq") {
@@ -238,39 +248,40 @@ Hoặc với tf:
         // bỏ "Câu 1:"
         question = question.replace(/^Câu\s*\d+[:.]\s*/i, "");
         question = question.replace(/\s+/g, " ").trim();
+        question = question.replace(/\.\?/g, "?");
+
         // đảm bảo là câu hỏi
         if (!question.endsWith("?")) {
           question = question + "?";
         }
+        if (
+          !/phát biểu nào/i.test(question) &&
+          !/(nào|gì|để|dùng|cho phép)/i.test(question)
+        ) {
+          if (/^(python|modem|switch|router|máy|thiết bị)/i.test(question)) {
+            question = "Phát biểu nào đúng về: " + question.replace(/\?$/, "");
+          }
+        }
+
+        if (/đúng|sai/i.test(question) && !/phát biểu nào/i.test(question)) {
+          question = "Phát biểu nào đúng: " + question;
+        }
 
         let options = Array.isArray(q.options) ? q.options : [];
 
-        // nếu thiếu options → tạo giả
-        if (options.length !== 4) {
-          options = [
-            "Đáp án đúng",
-            "Phương án nhiễu 1",
-            "Phương án nhiễu 2",
-            "Phương án nhiễu 3",
-          ];
-        }
-
         // clean options
         options = options.map(o => o.replace(/^[A-D]\.?/i, "").trim());
-        // remove duplicate options
         options = [...new Set(options)];
 
-        // nếu sau khi lọc bị thiếu → bù
         while (options.length < 4) {
           options.push("Phương án nhiễu " + (options.length + 1));
         }
 
-        // cắt nếu dư
         options = options.slice(0, 4);
 
         let answer = (q.answer || "").trim();
-
-        // nếu answer không khớp options → set lại
+        
+         // nếu answer không khớp options → set lại
         if (!options.includes(answer)) {
           answer = options[0];
         }
@@ -285,8 +296,8 @@ Hoặc với tf:
     }
 
     // ===== FIX TRUE/FALSE =====
-    if (type === "tf") {
-      questions = questions.map((q, i) => {
+    if (safeType === "tf") {
+      questions = questions.map((q) => {
         let text = (q.question || "").trim();
 
         // bỏ "Câu 1:"
@@ -295,15 +306,27 @@ Hoặc với tf:
         // bỏ dấu ?
         text = text.replace(/\?/g, "");
 
-        // bỏ cụm hỏi
-        text = text.replace(/\b(nào|gì|bao gồm|bao nhiêu|là gì)\b/gi, "");
+        // loại từ hỏi
+        text = text.replace(/\b(dưới đây|nào|gì|bao gồm|bao nhiêu|là gì)\b/gi, "");
 
-        // dọn khoảng trắng
+        // chuẩn hoá khoảng trắng
         text = text.replace(/\s+/g, " ").trim();
 
-        // nếu câu quá ngắn → tạo lại dạng khẳng định
-        if (text.length < 15) {
-          text = `Python là một ngôn ngữ lập trình thông dụng trong Tin học.`; 
+        // đổi dạng hỏi -> khẳng định
+        text = text.replace(/được sử dụng để/gi, "có chức năng");
+        text = text.replace(/dùng để/gi, "có chức năng");
+
+        // nếu thiếu chủ thể cụ thể → gán thông minh
+        if (/^thiết bị/i.test(text)) {
+          const map = ["Router", "Switch", "Modem"];
+          const pick = map[Math.floor(Math.random() * map.length)];
+          text = text.replace(/^thiết bị mạng/i, pick);
+          text = text.replace(/^thiết bị/i, pick);
+        }
+
+        // nếu vẫn quá chung chung
+        if (!/(router|switch|modem|python|tcp|ip)/i.test(text)) {
+          text = "Router thực hiện chức năng định tuyến gói tin giữa các mạng khác nhau.";
         }
 
         // đảm bảo kết thúc bằng .
@@ -318,10 +341,12 @@ Hoặc với tf:
         return {
           type: "tf",
           question: text,
-          answer: ans
+          answer: ans,
         };
       });
     }
+
+    questions = questions.filter(Boolean);
     // ===== REMOVE DUPLICATE QUESTIONS =====
     const seen = new Set();
     questions = questions.filter(q => {
@@ -330,7 +355,8 @@ Hoặc với tf:
       seen.add(key);
       return true;
     });
-
+    
+    questions = questions.slice(0, safeCount);
     res.json(questions);
 
   } catch (err) {
