@@ -64,7 +64,8 @@ app.post("/chat", async (req, res) => {
       {
         role: "system",
         content:
-          "Bạn là trợ giảng Tin học THPT Việt Nam. Trả lời ngắn gọn, dễ hiểu, đúng chương trình phổ thông.",
+          "Bạn là trợ giảng Tin học THPT Việt Nam. Trả lời ngắn gọn, dễ hiểu, đúng chương trình phổ thông. " +
+          "Mỗi ý nên xuống dòng, nếu liệt kê thì dùng dấu '-' để dễ đọc.",
       },
       ...(history || []),
       { role: "user", content: message },
@@ -89,12 +90,23 @@ app.post("/chat", async (req, res) => {
       return res.json({ reply: "⚠️ AI chưa phản hồi." });
     }
 
-    res.json({ reply: data.choices[0].message.content });
+    // ===== XỬ LÝ XUỐNG DÒNG =====
+    let reply = data.choices[0].message.content;
+
+    // Thêm xuống dòng nếu AI trả liên tiếp dấu chấm + khoảng trắng
+    reply = reply.replace(/\. /g, ".\n");
+
+    // Nếu AI dùng dấu - liệt kê, thêm xuống dòng trước dấu -
+    reply = reply.replace(/- /g, "\n- ");
+
+    // Trả về frontend
+    res.json({ reply });
   } catch (err) {
     console.error(err);
     res.status(500).json({ reply: "❌ Lỗi server AI" });
   }
 });
+
 
 /* ================= TẠO CÂU HỎI ================= */
 app.post("/generate-questions", async (req, res) => {
@@ -213,6 +225,9 @@ Hoặc với tf:
     });
 
     const data = await response.json();
+    if (!data.choices) {
+      console.log("FULL AI RESPONSE:", data);
+    }
 
     let text = data.choices?.[0]?.message?.content;
     if (!text) return res.json([]);
@@ -296,7 +311,7 @@ Hoặc với tf:
     }
 
     // ===== FIX TRUE/FALSE =====
-    if (safeType === "tf") {
+    if (type === "tf") {
       questions = questions.map((q) => {
         let text = (q.question || "").trim();
 
